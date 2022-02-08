@@ -1,0 +1,13 @@
+## Dynamic configuration
+http:
+  routers:
+    Router-1:
+      # By default, routers listen to every entry points
+      rule: "Host(`cloud.dacunha.ovh`)  || Host(`cloud.goneix.net`)"
+      service: "nextcloud"
+      tls: {}
+  services:
+    nextcloud:
+      loadBalancer:
+        servers:
+          - url: "http://cloud.goneix.lan/"
