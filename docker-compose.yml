@@ -1,0 +1,177 @@
+version: "3"
+services:
+  traefik:
+    restart: always
+    image: traefik:v2.5
+    container_name: traefik
+    read_only: true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./Traefik/traefik.yaml/traefik.yaml:/traefik.yaml:ro
+      - ./Traefik/etc/traefik:/etc/traefik/
+      - ./Traefik/log:/var/log/traefik/
+      - ./Traefik/routes.yaml:/etc/traefik/routes.yaml
+    command:
+      - --certificatesresolvers.myresolver.acme.dnschallenge=true
+      - --certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.myresolver.acme.email=julien@dacunha.ovh
+      - --certificatesresolvers.myresolver.acme.storage=/traefik/etc/acme.json
+      - --certificatesresolvers.myresolver.acme.caServer=https://acme-staging-v02.api.myresolver.org/directory
+      # Set up the TLS configuration for our websecure listener
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.certResolver=myresolver
+      - --entrypoints.websecure.http.tls.domains[0].main=goneix.net
+      - --entrypoints.websecure.http.tls.domains[0].sans=*.goneix.net
+    environment:
+      - CLOUDFLARE_EMAIL=julien@dacunha.ovh
+      - CLOUDFLARE_DNS_API_TOKEN=''
+    labels:
+      traefik.enable: true
+      traefik.http.routers.traefik_https.rule: Host(`traefik.goneix.net`)
+      traefik.http.routers.traefik_https.entrypoints: websecure
+      traefik.http.routers.traefik_https.tls: true
+      traefik.http.routers.traefik_https.tls.certResolver: myresolver
+      traefik.http.routers.traefik_https.service: api@internal
+      traefik.http.routers.traefik_https.middlewares: basic-auth-global
+      traefik.http.middlewares.basic-auth-global.basicauth.users: test:$$apr1$$H6uskkkW$$IgXLP6ewTrSuBkTrqE8wj/
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    user: "1000:1000"
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - ./prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - 9090:9090
+
+  node-exporter:
+    image: prom/node-exporter
+    container_name: node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command: 
+      - '--path.procfs=/host/proc' 
+      - '--path.sysfs=/host/sys'
+      - --collector.filesystem.ignored-mount-points
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+  
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    depends_on:
+      - prometheus
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.goneix.net`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+      - "traefik.port=3000"
+  
+  cf-companion:
+    container_name: cloudflare-companion
+    image: tiredofit/traefik-cloudflare-companion:latest
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TIMEZONE=Europe/Paris
+      - TRAEFIK_VERSION=2
+      - CF_EMAIL=julien@dacunha.ovh # Same as traefik
+      - CF_TOKEN='' # Same as traefik
+      - TARGET_DOMAIN=vpn.goneix.net
+      - DOMAIN1=goneix.net
+      - DOMAIN1_ZONE_ID='' # Copy from Cloudflare Overview page
+      - DOMAIN1_PROXIED=TRUE
+    #labels:
+      # Add hosts specified in rules here to force cf-companion to create the CNAMEs
+      # Since cf-companion creates CNAMEs based on host rules, this a workaround for non-docker/external apps
+      #- "traefik.http.routers.cf-companion-rtr.rule=HostHeader(`cloud.$DOMAINNAME`) || HostHeader(`hassio.$DOMAINNAME`)"
+
+  heimdall:
+    image: lscr.io/linuxserver/heimdall
+    container_name: heimdall
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Paris
+    volumes:
+      - ./heimdall:/config
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.heimdall.rule=Host(`goneix.net`)|| Host(`www.goneix.net`)"
+      - "traefik.http.routers.heimdall.entrypoints=websecure"
+      - "traefik.http.routers.heimdall.tls.certresolver=myresolver"
+      - "traefik.port=80"
+
+  librespeed:
+    image: lscr.io/linuxserver/librespeed
+    container_name: librespeed
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - PASSWORD=PASSWORD
+      - CUSTOM_RESULTS=false #optional
+      - DB_TYPE=sqlite #optional
+      - DB_NAME=DB_NAME #optional
+      - DB_HOSTNAME=DB_HOSTNAME #optional
+      - DB_USERNAME=DB_USERNAME #optional
+      - DB_PASSWORD=DB_PASSWORD #optional
+      - DB_PORT=DB_PORT #optional
+    volumes:
+      - /path/to/appdata/config:/config
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.librespeed.rule=Host(`speedtest.goneix.net`)"
+      - "traefik.http.routers.librespeed.entrypoints=websecure"
+      - "traefik.http.routers.librespeed.tls.certresolver=myresolver"
+      - "traefik.port=80"
+  netdata:
+    image: netdata/netdata:latest
+    container_name: netdata
+    hostname: 'reverse-proxy'
+    restart: unless-stopped
+    network_mode: "bridge"
+    ports:
+        - '19999:19999'
+    cap_add:
+        - SYS_PTRACE
+    security_opt:
+        - apparmor:unconfined
+    environment:
+        - PGID=${DOCKERGRP}
+    volumes:
+        - '/proc:/host/proc:ro'
+        - '/sys:/host/sys:ro'
+        - '/var/run/docker.sock:/var/run/docker.sock:rw'
+    environment:
+       - NETDATA_CLAIM_TOKEN=''
+       - NETDATA_CLAIM_URL=https://app.netdata.cloud
+       - NETDATA_CLAIM_ROOMS=''
