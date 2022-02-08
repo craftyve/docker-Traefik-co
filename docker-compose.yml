@@ -153,25 +153,25 @@ services:
       - "traefik.http.routers.librespeed.entrypoints=websecure"
       - "traefik.http.routers.librespeed.tls.certresolver=myresolver"
       - "traefik.port=80"
-  netdata:
+      
+   netdata:
     image: netdata/netdata:latest
     container_name: netdata
-    hostname: 'reverse-proxy'
-    restart: unless-stopped
-    network_mode: "bridge"
+    hostname: '${HOSTNAME}'
     ports:
         - '19999:19999'
+    restart: unless-stopped
     cap_add:
-        - SYS_PTRACE
+      - SYS_PTRACE
     security_opt:
-        - apparmor:unconfined
-    environment:
-        - PGID=${DOCKERGRP}
+      - apparmor:unconfined
     volumes:
-        - '/proc:/host/proc:ro'
-        - '/sys:/host/sys:ro'
-        - '/var/run/docker.sock:/var/run/docker.sock:rw'
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
     environment:
-       - NETDATA_CLAIM_TOKEN=''
-       - NETDATA_CLAIM_URL=https://app.netdata.cloud
-       - NETDATA_CLAIM_ROOMS=''
+        - NETDATA_CLAIM_TOKEN=''
+        - NETDATA_CLAIM_URL=https://app.netdata.cloud
+        - NETDATA_CLAIM_ROOMS=''
